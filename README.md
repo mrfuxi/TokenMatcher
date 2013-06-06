@@ -1,6 +1,10 @@
 TokenMatcher
 ============
 
+How to use:
+- Add jar to be loaded
+- Add valueSourceParser like: <valueSourceParser name="mtokens" class="com.fuxi.MatchingTokensParser" />
+
 Example of usage:
 
 <response>
