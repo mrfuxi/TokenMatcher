@@ -11,7 +11,6 @@ import org.apache.commons.lang.StringUtils;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.TokenStream;
 import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
-import org.apache.lucene.analysis.tokenattributes.OffsetAttribute;
 import org.apache.lucene.analysis.util.TokenFilterFactory;
 import org.apache.lucene.index.AtomicReaderContext;
 import org.apache.lucene.index.IndexReader;
@@ -31,10 +30,12 @@ public class MatchingTokensFunction extends ValueSource {
 	
 	protected final String field;
 	protected final String qterms;
+	protected final Boolean return_ids;
 
-	public MatchingTokensFunction(String field, String qterms) {
+	public MatchingTokensFunction(String field, String qterms, Boolean return_ids) {
 	    this.field = field;
 	    this.qterms = qterms;
+	    this.return_ids = return_ids;
 	}
 	
 	@Override
@@ -44,7 +45,7 @@ public class MatchingTokensFunction extends ValueSource {
 
 	@Override
 	public boolean equals(Object o) {
-		return o != null && o.getClass() == MatchingTokensFunction.class && this.field.equals(((MatchingTokensFunction)o).field) && this.qterms.equals(((MatchingTokensFunction)o).qterms);
+		return o != null && o.getClass() == MatchingTokensFunction.class && this.field.equals(((MatchingTokensFunction)o).field) && this.qterms.equals(((MatchingTokensFunction)o).qterms) && this.return_ids.equals(((MatchingTokensFunction)o).return_ids);
 	}
 	
 	public static LinkedHashMap<String, List<String>> getTokens(TokenizerChain analyzer, String field, String terms) throws IOException {
@@ -158,7 +159,13 @@ public class MatchingTokensFunction extends ValueSource {
 					--loop_no;
 					
 					if (matching_terms.contains(key)) {
-						sorted_matching_terms.add(key);
+						if (return_ids) {
+							Integer key_id = qTokens.entrySet().size() - loop_no;
+							sorted_matching_terms.add(key_id.toString());
+						} else {
+							sorted_matching_terms.add(key);
+						}
+							
 						counter++;
 					} 
 					
@@ -196,7 +203,7 @@ public class MatchingTokensFunction extends ValueSource {
 
 	@Override
 	public int hashCode() {
-		return hcode + field.hashCode() + qterms.hashCode();
+		return hcode + field.hashCode() + qterms.hashCode() + return_ids.hashCode();
 	}
 
 }

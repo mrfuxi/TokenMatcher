@@ -17,10 +17,13 @@ public class MatchingTokensParser extends ValueSourceParser {
 	public ValueSource parse(FunctionQParser fqp) throws SyntaxError {
 		String field = fqp.parseId();
 		String qterms = fqp.parseArg();
+		String result_type_str = fqp.parseArg();
+		
+		Boolean resuts_as_ids = result_type_str.equalsIgnoreCase("id");
 		
 		//ValueSource source = fqp.parseValueSource();
 		//return new MatchingTokensFunction(source);
-		return new MatchingTokensFunction(field, qterms);
+		return new MatchingTokensFunction(field, qterms, resuts_as_ids);
 	}
 
 }
