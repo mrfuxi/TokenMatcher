@@ -19,7 +19,12 @@ public class MatchingTokensParser extends ValueSourceParser {
 		String qterms = fqp.parseArg();
 		String result_type_str = fqp.parseArg();
 		
-		Boolean resuts_as_ids = result_type_str.equalsIgnoreCase("id");
+		Boolean resuts_as_ids = false;
+		
+		if (result_type_str != null)
+		{
+			resuts_as_ids = result_type_str.equalsIgnoreCase("id");
+		}
 		
 		//ValueSource source = fqp.parseValueSource();
 		//return new MatchingTokensFunction(source);
