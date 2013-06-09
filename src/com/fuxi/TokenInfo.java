@@ -8,12 +8,6 @@ public class TokenInfo {
 	private String term;
 	private Integer term_id;
 	private Integer position;
-
-	/*public TokenInfo(String term) {
-		this.term = term;
-		this.position = null;
-		this.term_id = null;
-	}*/
 	
 	public TokenInfo(String term, Integer term_id, Integer position) {
 		this.term = term;
