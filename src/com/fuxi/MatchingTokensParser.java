@@ -37,10 +37,10 @@ public class MatchingTokensParser extends ValueSourceParser {
 	@Override
 	public ValueSource parse(FunctionQParser fqp) throws SyntaxError {
 		String field = fqp.parseId();
-		String qterms = fqp.parseArg();
+		ValueSource qterms = fqp.parseValueSource();
 		String result_type_str = fqp.parseArg();
 		String matching_type_str = fqp.parseArg();
-				
+
 		MatchingTokensFunction.ResultType result_type = castToEnum(result_type_str,
 																   MatchingTokensFunction.ResultType.class,
 																   MatchingTokensFunction.ResultType.term);

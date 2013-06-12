@@ -27,7 +27,7 @@ public class TokenInfo {
 		return term_id;
 	}
 
-	public void setTermId(int term_id) {
+	public void setTermId(Integer term_id) {
 		this.term_id = term_id;
 	}
 
@@ -35,10 +35,28 @@ public class TokenInfo {
 		return position;
 	}
 
-	public void setPosition(int position) {
+	public void setPosition(Integer position) {
 		this.position = position;
 	}
 
+	public TokenInfo copy_some(Boolean c_term, Boolean c_term_id, Boolean c_position) {
+        TokenInfo n_token = new TokenInfo(term, term_id, position);
+        
+        if (!c_term) {
+            n_token.setTerm(null);
+        }
+        
+        if (!c_term_id) {
+            n_token.setTermId(null);
+        }
+        
+        if (!c_position) {
+            n_token.setPosition(null);
+        }
+        
+        return n_token;
+	}
+	
 	@Override
 	public boolean equals(Object obj) {
 		if (obj == null) {
@@ -68,6 +86,36 @@ public class TokenInfo {
 	
 	@Override
 	public String toString() {
-		return term;
+		return getDebugInfo();
 	}
+    
+    public String getDebugInfo() {
+        String info = "";
+        
+        if (term != null) {
+            info += term;
+        } else {
+            info += "null";
+        }
+        
+        info += " (id: ";
+        
+        if (term_id != null) {
+            info += term_id.toString();
+        } else {
+            info += "null";
+        }
+        
+        info += ", ";
+        
+        if (position != null) {
+            info += position.toString();
+        } else {
+            info += "null";
+        }
+        
+        info += ")";
+        
+        return info;
+    }
 }

@@ -3,11 +3,9 @@ package com.fuxi;
 import java.io.IOException;
 import java.io.StringReader;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import org.apache.commons.lang.StringUtils;
 import org.apache.lucene.analysis.Analyzer;
@@ -41,14 +39,14 @@ public class MatchingTokensFunction extends ValueSource {
 	private static Logger LOGGER = LoggerFactory.getLogger(MatchingTokensFunction.class);
 	
 	protected final String field;
-	protected final String qterms;
+	protected final ValueSource qterms_source;
 	protected final ResultType result_type;
 	protected final MatchingType matching_type;
 	protected final SolrIndexSearcher searcher;
 
-	public MatchingTokensFunction(String field, String qterms, ResultType result_type, MatchingType matching_type, SolrIndexSearcher searcher) {
+	public MatchingTokensFunction(String field, ValueSource qterms_source, ResultType result_type, MatchingType matching_type, SolrIndexSearcher searcher) {
 	    this.field = field;
-	    this.qterms = qterms;
+	    this.qterms_source = qterms_source;
 	    this.result_type = result_type;
 	    this.searcher = searcher;
 	    this.matching_type = matching_type;
@@ -64,7 +62,7 @@ public class MatchingTokensFunction extends ValueSource {
 		return o != null && 
 			   o.getClass() == MatchingTokensFunction.class &&
 			   this.field.equals(((MatchingTokensFunction)o).field) &&
-			   this.qterms.equals(((MatchingTokensFunction)o).qterms) &&
+			   this.qterms_source.equals(((MatchingTokensFunction)o).qterms_source) &&
 			   this.result_type.equals(((MatchingTokensFunction)o).result_type) &&
 			   this.matching_type.equals(((MatchingTokensFunction)o).matching_type);
 	}
@@ -129,7 +127,8 @@ public class MatchingTokensFunction extends ValueSource {
 	@Override
 	public FunctionValues getValues(Map context, AtomicReaderContext readerContext) throws IOException {
 		final IndexReader topReader = ReaderUtil.getTopLevelContext(readerContext).reader();
-	    
+        final FunctionValues qterms_func_val = qterms_source.getValues(context, readerContext);
+        
 		return new StrDocValues(this) {
 			
 			@Override
@@ -137,8 +136,16 @@ public class MatchingTokensFunction extends ValueSource {
 				List<TokenInfo> matching_terms = new ArrayList<TokenInfo>();
 				LinkedHashMap<TokenInfo, List<String>> qTokens = null;
 				List<TokenInfo> tokenized_field_terms = null;
+                
+                String qterms = qterms_func_val.strVal(doc);
 				
 				try {
+                    Document document = searcher.doc(doc);
+                    
+                    if (document.get(field) == null) {
+                        return null;
+                    }
+                    
 					FieldType field_type = searcher.getCore().getSchema().getField(field).getType(); 
 					Analyzer analyzer = field_type.getAnalyzer();
 					
@@ -146,27 +153,25 @@ public class MatchingTokensFunction extends ValueSource {
 						LOGGER.error("Field " + field + " has unsupported type. Field has to specify an analyzer.");
 						return null;
 					}
-											
-					Document document = searcher.doc(doc);
+					
 					TokenStream ts = TokenSources.getAnyTokenStream(topReader, doc, field, document, analyzer);					
 					
 					CharTermAttribute charTermAttribute = null;
 					PositionIncrementAttribute posIncAttribute = null;
-										
+					
 					try {
 						charTermAttribute = ts.addAttribute(CharTermAttribute.class);
 					} catch (IllegalArgumentException e) {
 						LOGGER.error("There was a problem with field " + field + ". Text term could not be extracted, due to field type.");
 						return null;
 					}
-
+                    
 					try {
 						posIncAttribute = ts.addAttribute(PositionIncrementAttribute.class);
 					} catch (IllegalArgumentException e) {
 						LOGGER.error("There was a problem with field " + field + ". Text term's position could not be extracted, due to field type.");
 						return null;
 					}
-
 					
 					TokenizerChain qanalyzer = (TokenizerChain)field_type.getQueryAnalyzer();					
 					qTokens = getTokens(qanalyzer, field, qterms);
@@ -184,9 +189,6 @@ public class MatchingTokensFunction extends ValueSource {
 							TokenInfo token_info = qTokenEntry.getKey();
 							List<String> qAnalyzedTokens = qTokenEntry.getValue();
 							
-							/*
-							 * FIXME: Check existence of term also based on it's position! DONE?
-							 */
 							if (!matching_terms.contains(token_info) && qAnalyzedTokens.contains(term) ) {
 								token_info.setPosition(token_position);
 								matching_terms.add(token_info);
@@ -211,82 +213,104 @@ public class MatchingTokensFunction extends ValueSource {
 				
 				List<String> str_values = new ArrayList<String>();
 
-				List<String> sorted_matching_terms = new ArrayList<String>();
+                List<TokenInfo> sorted_matching_terms = new ArrayList<TokenInfo>();
 				
 				// Synchronise order
-				int counter = 0;
 				int loop_no = qTokens.entrySet().size();
 				
 				for (Map.Entry<TokenInfo, List<String>> qTokenEntry : qTokens.entrySet()) {
 					TokenInfo token_info = qTokenEntry.getKey();
 
 					--loop_no;
-					
-					if (matching_terms.contains(token_info)) {
-						switch (result_type) {
-							case id:
-								sorted_matching_terms.add(token_info.getTermId().toString());
-								break;
-	
-							case term:
-								sorted_matching_terms.add(token_info.getTerm());
-								break;
-							
-							case all:
-								sorted_matching_terms.add(token_info.getTerm() + "(" + token_info.getTermId().toString() + " - " + token_info.getPosition().toString() + ")");
-								break;
-							
-							default:
-								LOGGER.error("Result type unsuported: " + result_type.toString());
-								return null;
-						}
-							
-						counter++;
+
+					Boolean trigger_group = false;
+                    
+                    if (matching_terms.contains(token_info) && (token_info.getPosition() != null)) {
+                        Boolean add_term = false;
+                        
+                        if (matching_type == MatchingType.full || matching_type == MatchingType.full_ordered) {
+                            if (!sorted_matching_terms.contains(token_info.copy_some(false, false, true))) {
+                                add_term = true;
+                            } else if (sorted_matching_terms.size() != tokenized_field_terms.size()) {
+                                sorted_matching_terms.clear();
+                                add_term = true;
+                            }
+                            
+                            if (matching_type == MatchingType.full_ordered &&
+                                       !sorted_matching_terms.isEmpty() &&
+                                       token_info.getPosition() <= sorted_matching_terms.get(sorted_matching_terms.size()-1).getPosition()) {
+                                sorted_matching_terms.clear();
+                                add_term = true;
+                            }
+                            
+                        } else {
+                            add_term = true;
+                        }
+                        
+                        if (add_term) {
+                            if (result_type == ResultType.all) {
+                                LOGGER.warn("Doc: " + doc + ". Add as match: " + token_info + ". Key: " + token_info.copy_some(false, false, true));
+                            }
+                            sorted_matching_terms.add(token_info);
+                        } else {
+                            if (result_type == ResultType.all) {
+                                LOGGER.warn("Doc: " + doc + ". Will not add: " + token_info + ". Key: " + token_info.copy_some(false, false, true));
+                            }
+                        }
+                        
+                        if ((matching_type == MatchingType.full || matching_type == MatchingType.full_ordered) &&
+                            sorted_matching_terms.size() == tokenized_field_terms.size()) {
+                            trigger_group = true;
+                        }
 					}
 					
-					if (!matching_terms.contains(token_info) | loop_no == 0) {
-						if (matching_type == MatchingType.full)
-						{
-							/*
-							 * FIXME: Get correct counts based on unique matches!. To do that, convert tokens to strings much later
-							Set<Integer> positions = new HashSet<Integer>();
-							
-							for (TokenInfo ti: sorted_matching_terms) {
-								if (ti.getPosition() != null) {
-									
-								}
-							}
-							*/
-							
+					if (!matching_terms.contains(token_info) || trigger_group == true || loop_no == 0) {
+						if (matching_type == MatchingType.full) {
 							if (sorted_matching_terms.size() < tokenized_field_terms.size()) {
+                                if (result_type == ResultType.all) {
+                                    LOGGER.warn("Too little");
+                                }
+
 								sorted_matching_terms.clear();
-								counter = 0;
-								//return "too little";
 								continue;
-							} else if (sorted_matching_terms.size() > tokenized_field_terms.size()) {
-								// FIXME: produce results when there are terms that matched more than 1 time
-								/*
-								sorted_matching_terms.clear();
-								counter = 0;
-								continue;
-								//return "too much";
-								*/
-							}
+                            }
 						}
 						
-						String key = StringUtils.join(sorted_matching_terms, " ");						
+						List<String> token_repr = new ArrayList<String>();
+						
+						for (TokenInfo ti: sorted_matching_terms) {
+                            switch (result_type) {
+                                case id:
+                                    token_repr.add(ti.getTermId().toString());
+                                    break;
+        
+                                case term:
+                                    token_repr.add(ti.getTerm());
+                                    break;
+                                
+                                case all:
+                                    token_repr.add(ti.getDebugInfo());
+                                    break;
+                                
+                                default:
+                                    LOGGER.error("Result type unsuported: " + result_type.toString());
+                                    return null;
+                            }
+						}
+						
+						String key = StringUtils.join(token_repr, " ");
 						str_values.add(key);
-						sorted_matching_terms.clear();
 
-						if (counter > longest_count) {
-							longest_count = counter;
+                        if (token_repr.size() > longest_count) {
+                            longest_count = token_repr.size();
 							entry_ids.clear();
 							entry_ids.add(str_values.size()-1);
-						} else if (counter == longest_count) {
+                        } else if (token_repr.size() == longest_count) {
 							entry_ids.add(str_values.size()-1);
 						}
-						counter = 0;
-
+                        
+						sorted_matching_terms.clear();
+                        token_repr.clear();
 					}
 				}
 				
@@ -312,7 +336,7 @@ public class MatchingTokensFunction extends ValueSource {
 
 	@Override
 	public int hashCode() {
-		return hcode + field.hashCode() + qterms.hashCode() + result_type.hashCode() + matching_type.hashCode();
+		return hcode + field.hashCode() + qterms_source.hashCode() + result_type.hashCode() + matching_type.hashCode();
 	}
 
 }
