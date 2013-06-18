@@ -37,6 +37,7 @@ public class MatchingTokensFunction extends ValueSource {
 	}
 	
 	private static Logger LOGGER = LoggerFactory.getLogger(MatchingTokensFunction.class);
+    private static String func_name = "mtokens";
 	
 	protected final String field;
 	protected final ValueSource qterms_source;
@@ -54,7 +55,7 @@ public class MatchingTokensFunction extends ValueSource {
 	
 	@Override
 	public String description() {
-		return "mtokens()";
+		return func_name + "()";
 	}
 
 	@Override
@@ -129,16 +130,24 @@ public class MatchingTokensFunction extends ValueSource {
 		final IndexReader topReader = ReaderUtil.getTopLevelContext(readerContext).reader();
         final FunctionValues qterms_func_val = qterms_source.getValues(context, readerContext);
         
+        
+        final FieldType field_type = searcher.getCore().getSchema().getField(field).getType();
+        final TokenizerChain qanalyzer = (TokenizerChain)field_type.getQueryAnalyzer();
+        
+        String qterms = qterms_func_val.strVal(0);
+        
+        final LinkedHashMap<TokenInfo, List<String>> qTokens = getTokens(qanalyzer, field, qterms);
+        
 		return new StrDocValues(this) {
 			
 			@Override
 			public String strVal(int doc) {
-				List<TokenInfo> matching_terms = new ArrayList<TokenInfo>();
-				LinkedHashMap<TokenInfo, List<String>> qTokens = null;
-				List<TokenInfo> tokenized_field_terms = null;
+                long estimatedTime = -1;
+                long startTime = System.nanoTime();
                 
-                String qterms = qterms_func_val.strVal(doc);
-				
+				List<TokenInfo> matching_terms = new ArrayList<TokenInfo>();
+                Integer tokenized_field_terms_count = null;
+                
 				try {
                     Document document = searcher.doc(doc);
                     
@@ -146,19 +155,18 @@ public class MatchingTokensFunction extends ValueSource {
                         return null;
                     }
                     
-					FieldType field_type = searcher.getCore().getSchema().getField(field).getType(); 
 					Analyzer analyzer = field_type.getAnalyzer();
 					
 					if (!field_type.isTokenized()) {
 						LOGGER.error("Field " + field + " has unsupported type. Field has to specify an analyzer.");
 						return null;
 					}
-					
-					TokenStream ts = TokenSources.getAnyTokenStream(topReader, doc, field, document, analyzer);					
+                    
+					TokenStream ts = TokenSources.getAnyTokenStream(topReader, doc, field, analyzer);
 					
 					CharTermAttribute charTermAttribute = null;
 					PositionIncrementAttribute posIncAttribute = null;
-					
+                    
 					try {
 						charTermAttribute = ts.addAttribute(CharTermAttribute.class);
 					} catch (IllegalArgumentException e) {
@@ -173,10 +181,18 @@ public class MatchingTokensFunction extends ValueSource {
 						return null;
 					}
 					
-					TokenizerChain qanalyzer = (TokenizerChain)field_type.getQueryAnalyzer();					
-					qTokens = getTokens(qanalyzer, field, qterms);
-					
-					tokenized_field_terms = getTokenizedTerms((TokenizerChain)analyzer, field, document.get(field));
+                    /* Try to load terms count from Solr's Cache */
+                    tokenized_field_terms_count = (Integer)searcher.cacheLookup(func_name, doc + field);
+                    if (tokenized_field_terms_count == null) {
+                        List<TokenInfo> tokenized_field_terms = getTokenizedTerms((TokenizerChain)analyzer, field, document.get(field));
+                        if (tokenized_field_terms != null) {
+                            tokenized_field_terms_count = tokenized_field_terms.size();
+                            searcher.cacheInsert(func_name, doc + field, tokenized_field_terms_count);
+                        } else {
+                            LOGGER.error("There was a problem with field " + field + ". Could not tokenize field value! (not stored?)");
+                            return null;
+                        }
+                    }
 					
 					ts.reset();
 					
@@ -195,7 +211,6 @@ public class MatchingTokensFunction extends ValueSource {
 							}
 						}
 					}
-					
 					ts.close();
 					
 				} catch (IOException e) {
@@ -231,7 +246,7 @@ public class MatchingTokensFunction extends ValueSource {
                         if (matching_type == MatchingType.full || matching_type == MatchingType.full_ordered) {
                             if (!sorted_matching_terms.contains(token_info.copy_some(false, false, true))) {
                                 add_term = true;
-                            } else if (sorted_matching_terms.size() != tokenized_field_terms.size()) {
+                            } else if (sorted_matching_terms.size() != tokenized_field_terms_count) {
                                 sorted_matching_terms.clear();
                                 add_term = true;
                             }
@@ -259,14 +274,14 @@ public class MatchingTokensFunction extends ValueSource {
                         }
                         
                         if ((matching_type == MatchingType.full || matching_type == MatchingType.full_ordered) &&
-                            sorted_matching_terms.size() == tokenized_field_terms.size()) {
+                            sorted_matching_terms.size() == tokenized_field_terms_count) {
                             trigger_group = true;
                         }
 					}
 					
 					if (!matching_terms.contains(token_info) || trigger_group == true || loop_no == 0) {
 						if (matching_type == MatchingType.full) {
-							if (sorted_matching_terms.size() < tokenized_field_terms.size()) {
+							if (sorted_matching_terms.size() < tokenized_field_terms_count) {
                                 if (result_type == ResultType.all) {
                                     LOGGER.warn("Too little");
                                 }
@@ -319,11 +334,15 @@ public class MatchingTokensFunction extends ValueSource {
 					return null;
 				}
 				
+                
 				List<String> top_str_values = new ArrayList<String>();
 				
 				for (int entry_id: entry_ids) {
 					top_str_values.add(str_values.get(entry_id));
 				}
+                
+                estimatedTime = System.nanoTime() - startTime;
+                //LOGGER.warn("estimatedTime: " + estimatedTime/1000000.0 + "ms");
 
 				return StringUtils.join(top_str_values, " | ");
 			}
