@@ -56,13 +56,14 @@ public class MatchingTokensHelper extends SearchComponent {
 			// not enough info to run component
 			return;
 		}
-        
+		
 		NamedList<NamedList<String>> response = new SimpleOrderedMap<NamedList<String>>();
 		
 		for (String field: fields) {
 			FieldType field_type = rb.req.getSchema().getField(field).getType();
 			TokenizerChain qanalyzer = (TokenizerChain)field_type.getQueryAnalyzer();
-			List<TokenInfo> tokenized_terms = MatchingTokensFunction.getTokenizedTerms(qanalyzer, field, terms);
+			int filters_no = rb.req.getParams().getFieldInt(field, "filters", 0);
+			List<TokenInfo> tokenized_terms = MatchingTokensFunction.getTokenizedTerms(qanalyzer, field, terms, filters_no);
 			
 			NamedList<String> tokensList = new NamedList<String>();
 			

@@ -2,6 +2,7 @@ package com.fuxi;
 
 import java.io.IOException;
 import java.io.StringReader;
+import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -44,13 +45,15 @@ public class MatchingTokensFunction extends ValueSource {
 	protected final ResultType result_type;
 	protected final MatchingType matching_type;
 	protected final SolrIndexSearcher searcher;
+    protected final int filters_no;
 
-	public MatchingTokensFunction(String field, ValueSource qterms_source, ResultType result_type, MatchingType matching_type, SolrIndexSearcher searcher) {
+	public MatchingTokensFunction(String field, ValueSource qterms_source, ResultType result_type, MatchingType matching_type, SolrIndexSearcher searcher, int filters_no) {
 	    this.field = field;
 	    this.qterms_source = qterms_source;
 	    this.result_type = result_type;
 	    this.searcher = searcher;
 	    this.matching_type = matching_type;
+        this.filters_no = filters_no;
 	}
 	
 	@Override
@@ -68,18 +71,26 @@ public class MatchingTokensFunction extends ValueSource {
 			   this.matching_type.equals(((MatchingTokensFunction)o).matching_type);
 	}
 	
-	public static List<TokenInfo> getTokenizedTerms(TokenizerChain analyzer, String field, String terms) throws IOException {
-		// Create analyzer without filters to get tokens
+	public static List<TokenInfo> getTokenizedTerms(TokenizerChain analyzer, String field, String terms, int filters_no) throws IOException {
+		// Create analyzer with some of filters to get tokens
 
 		List<TokenInfo> tokens = new ArrayList<TokenInfo>();
 		if (terms == null) {
 			return tokens;
 		}
-		
-		TokenFilterFactory[] empty_filters = new TokenFilterFactory[0];
+
+		TokenFilterFactory[] filters = null;
+        if (filters_no == 0) {
+            filters = new TokenFilterFactory[0];
+        } else if (filters_no == -1) {
+            filters = analyzer.getTokenFilterFactories();
+        } else {
+            filters = Arrays.copyOfRange(analyzer.getTokenFilterFactories(), 0, filters_no);
+        }
+        
 		TokenizerChain token_analyzer = new TokenizerChain(analyzer.getCharFilterFactories(),
 														   analyzer.getTokenizerFactory(),
-														   empty_filters);
+														   filters);
 		
 		StringReader qReader = new StringReader(terms);
 		TokenStream qts = token_analyzer.tokenStream(field, qReader);
@@ -100,8 +111,8 @@ public class MatchingTokensFunction extends ValueSource {
 		return tokens;
 	}
 	
-	public static LinkedHashMap<TokenInfo, List<String>> getTokens(TokenizerChain analyzer, String field, String terms) throws IOException {
-		List<TokenInfo> tokenized_terms = getTokenizedTerms(analyzer, field, terms);
+	public static LinkedHashMap<TokenInfo, List<String>> getTokens(TokenizerChain analyzer, String field, String terms, int filters_no) throws IOException {
+		List<TokenInfo> tokenized_terms = getTokenizedTerms(analyzer, field, terms, filters_no);
 		
 		LinkedHashMap<TokenInfo, List<String>> tokens = new LinkedHashMap<TokenInfo, List<String>>();
 		 
@@ -136,7 +147,7 @@ public class MatchingTokensFunction extends ValueSource {
         
         String qterms = qterms_func_val.strVal(0);
         
-        final LinkedHashMap<TokenInfo, List<String>> qTokens = getTokens(qanalyzer, field, qterms);
+        final LinkedHashMap<TokenInfo, List<String>> qTokens = getTokens(qanalyzer, field, qterms, filters_no);
         
 		return new StrDocValues(this) {
 			
@@ -182,12 +193,12 @@ public class MatchingTokensFunction extends ValueSource {
 					}
 					
                     /* Try to load terms count from Solr's Cache */
-                    tokenized_field_terms_count = (Integer)searcher.cacheLookup(func_name, doc + field);
+                    tokenized_field_terms_count = (Integer)searcher.cacheLookup(func_name, doc + field + filters_no);
                     if (tokenized_field_terms_count == null) {
-                        List<TokenInfo> tokenized_field_terms = getTokenizedTerms((TokenizerChain)analyzer, field, document.get(field));
+                        List<TokenInfo> tokenized_field_terms = getTokenizedTerms((TokenizerChain)analyzer, field, document.get(field), filters_no);
                         if (tokenized_field_terms != null) {
                             tokenized_field_terms_count = tokenized_field_terms.size();
-                            searcher.cacheInsert(func_name, doc + field, tokenized_field_terms_count);
+                            searcher.cacheInsert(func_name, doc + field + filters_no, tokenized_field_terms_count);
                         } else {
                             LOGGER.error("There was a problem with field " + field + ". Could not tokenize field value! (not stored?)");
                             return null;

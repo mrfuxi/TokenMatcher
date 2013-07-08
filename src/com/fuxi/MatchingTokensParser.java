@@ -40,6 +40,7 @@ public class MatchingTokensParser extends ValueSourceParser {
 		ValueSource qterms = fqp.parseValueSource();
 		String result_type_str = fqp.parseArg();
 		String matching_type_str = fqp.parseArg();
+		int filters_no = fqp.getParams().getFieldInt(field, "filters", 0);
 
 		MatchingTokensFunction.ResultType result_type = castToEnum(result_type_str,
 																   MatchingTokensFunction.ResultType.class,
@@ -49,7 +50,7 @@ public class MatchingTokensParser extends ValueSourceParser {
 																	   MatchingTokensFunction.MatchingType.class,
 																	   MatchingTokensFunction.MatchingType.simple);
 		
-		return new MatchingTokensFunction(field, qterms, result_type, matching_type, fqp.getReq().getSearcher());
+		return new MatchingTokensFunction(field, qterms, result_type, matching_type, fqp.getReq().getSearcher(), filters_no);
 	}
 
 }
