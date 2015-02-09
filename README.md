@@ -17,6 +17,7 @@ How to use:
 
 Example of usage:
 
+```
 <response>
 	<lst name="responseHeader">
 		<int name="status">0</int>
@@ -63,3 +64,4 @@ Example of usage:
 		</lst>
 	</lst>
 </response>
+```
